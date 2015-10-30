@@ -20,22 +20,28 @@ func main() {
 	app.Version = "basespace-download"
 	app.Usage = "basespace-download - Basespace file downloader"
 	app.Flags = []cli.Flag{
-		cli.StringFlag{Name: "t", Value: "", Usage: "Application token from Basespace"},
+		cli.StringFlag{Name: "t", Value: "", Usage: "Application token from Basespace", EnvVar: "BASESPACE_APP_TOKEN"},
 		cli.StringFlag{Name: "s", Value: "", Usage: "Sample ID to download"},
 		cli.StringFlag{Name: "p", Value: "", Usage: "Project ID to download (all samples)"},
 		cli.BoolFlag{Name: "dr", Usage: "Dry-run (don't download files)"},
 	}
 
 	app.Action = func(c *cli.Context) {
-		if c.String("t") == "" {
-			fmt.Fprintf(os.Stderr, "Missing app-token! You must obtain an Application Token from Illumina!\n\n")
-			os.Exit(1)
-		} else if c.String("s") != "" {
+		if c.String("s") != "" {
+			if c.String("t") == "" {
+				fmt.Fprintf(os.Stderr, "ERROR: Missing app-token! You must obtain an Application Token from Illumina!\n\n")
+				os.Exit(1)
+			}
 			downloadSample(c.String("t"), c.String("s"), "", "", c.Bool("dr"))
 		} else if c.String("p") != "" {
+			if c.String("t") == "" {
+				fmt.Fprintf(os.Stderr, "ERROR: Missing app-token! You must obtain an Application Token from Illumina!\n\n")
+				os.Exit(1)
+			}
 			downloadProject(c.String("t"), c.String("p"), c.Bool("dr"))
 		} else {
-			fmt.Fprintf(os.Stderr, "You must specify either a sample (-s) or project (-p) to download!\n\n")
+			fmt.Fprintf(os.Stderr, "ERROR: You must specify either a sample (-s) or project (-p) to download!\n\n")
+			cli.ShowAppHelp(c)
 			os.Exit(1)
 		}
 	}
