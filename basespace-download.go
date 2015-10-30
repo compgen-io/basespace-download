@@ -12,7 +12,7 @@ import (
 	"os"
 )
 
-var basespaceApiUrl = "https://api.basespace.illumina.com/v1pre3/"
+var basespaceApiUrl = "https://api.basespace.illumina.com/v1pre3"
 
 func main() {
 	app := cli.NewApp()
@@ -23,6 +23,7 @@ func main() {
 		cli.StringFlag{Name: "t", Value: "", Usage: "Application token from Basespace"},
 		cli.StringFlag{Name: "s", Value: "", Usage: "Sample ID to download"},
 		cli.StringFlag{Name: "p", Value: "", Usage: "Project ID to download (all samples)"},
+		cli.BoolFlag{Name: "dr", Usage: "Dry-run (don't download files)"},
 	}
 
 	app.Action = func(c *cli.Context) {
@@ -30,9 +31,9 @@ func main() {
 			fmt.Fprintf(os.Stderr, "Missing app-token! You must obtain an Application Token from Illumina!\n\n")
 			os.Exit(1)
 		} else if c.String("s") != "" {
-			downloadSample(c.String("t"), c.String("s"), "", "")
+			downloadSample(c.String("t"), c.String("s"), "", "", c.Bool("dr"))
 		} else if c.String("p") != "" {
-			downloadProject(c.String("t"), c.String("p"))
+			downloadProject(c.String("t"), c.String("p"), c.Bool("dr"))
 		} else {
 			fmt.Fprintf(os.Stderr, "You must specify either a sample (-s) or project (-p) to download!\n\n")
 			os.Exit(1)
@@ -43,58 +44,70 @@ func main() {
 
 }
 
-func downloadSample(token, sampleId, sampleName, prefix string) {
+func downloadSample(token, sampleId, sampleName, prefix string, dryrun bool) {
 	if sampleName == "" {
 		sampleName = getSampleName(token, sampleId)
 	}
 	fmt.Fprintf(os.Stderr, "%sSample: [%s] %s\n", prefix, sampleId, sampleName)
 
-	url := basespaceApiUrl + "samples/" + sampleId + "/files?access_token="
+	offset := 0
+	total := 0
 
-	resp, err := http.Get(url + token)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error downloading URL: %s\n\n", url)
-		os.Exit(1)
-	}
+	for total == 0 || offset < total {
+		url := fmt.Sprintf("%s/samples/%s/files?Offset=%d&access_token=", basespaceApiUrl, sampleId, offset)
 
-	defer resp.Body.Close()
-	body, err := ioutil.ReadAll(resp.Body)
+		resp, err := http.Get(url + token)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error downloading URL: %s\n\n", url)
+			os.Exit(1)
+		}
 
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error processing reading result: %s\n\n", string(body))
-		os.Exit(1)
-	}
+		defer resp.Body.Close()
+		body, err := ioutil.ReadAll(resp.Body)
 
-	var f map[string]interface{}
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error processing reading result: %s\n\n", string(body))
+			os.Exit(1)
+		}
 
-	if err = json.Unmarshal(body, &f); err != nil {
-		fmt.Fprintf(os.Stderr, "Error processing JSON: %s\n\n", string(body))
-		os.Exit(1)
-	}
+		var f map[string]interface{}
 
-	for k, v := range f {
-		if k == "Response" {
-			for k2, v2 := range v.(map[string]interface{}) {
-				if k2 == "Items" {
-					items := v2.([]interface{})
-					for i := range items {
-						v3 := items[i].(map[string]interface{})
-						fileId := v3["Id"].(string)
-						filename := v3["Name"].(string)
-						fileSize := v3["Size"].(float64)
-						downloadFile(token, fileId, filename, int64(fileSize), prefix+"  ")
+		if err = json.Unmarshal(body, &f); err != nil {
+			fmt.Fprintf(os.Stderr, "Error processing JSON: %s\n\n", string(body))
+			os.Exit(1)
+		}
+
+		for k, v := range f {
+			if k == "Response" {
+				for k2, v2 := range v.(map[string]interface{}) {
+					if k2 == "Items" {
+						items := v2.([]interface{})
+						for i := range items {
+							v3 := items[i].(map[string]interface{})
+							fileId := v3["Id"].(string)
+							filename := v3["Name"].(string)
+							fileSize := v3["Size"].(float64)
+							downloadFile(token, fileId, filename, int64(fileSize), prefix+"  ", dryrun)
+						}
 					}
 				}
+				total = int(v.(map[string]interface{})["TotalCount"].(float64))
+				displayed := int(v.(map[string]interface{})["DisplayedCount"].(float64))
+				offset += displayed
 			}
 		}
 	}
 
 }
 
-func downloadFile(token, fileId, filename string, fileSize int64, prefix string) {
+func downloadFile(token, fileId, filename string, fileSize int64, prefix string, dryrun bool) {
 	fmt.Fprintf(os.Stderr, "%s%s\n", prefix, filename)
 
-	url := basespaceApiUrl + "files/" + fileId + "/content?access_token="
+	if dryrun {
+		return
+	}
+
+	url := basespaceApiUrl + "/files/" + fileId + "/content?access_token="
 	resp, err := http.Get(url + token)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error downloading URL: %s\n\n", url)
@@ -128,7 +141,7 @@ func downloadFile(token, fileId, filename string, fileSize int64, prefix string)
 }
 
 func getProjectName(token, projectId string) string {
-	url := basespaceApiUrl + "projects/" + projectId + "/?access_token="
+	url := basespaceApiUrl + "/projects/" + projectId + "/?access_token="
 
 	resp, err := http.Get(url + token)
 	if err != nil {
@@ -155,7 +168,7 @@ func getProjectName(token, projectId string) string {
 }
 
 func getSampleName(token, sampleId string) string {
-	url := basespaceApiUrl + "samples/" + sampleId + "/?access_token="
+	url := basespaceApiUrl + "/samples/" + sampleId + "/?access_token="
 
 	resp, err := http.Get(url + token)
 	if err != nil {
@@ -181,44 +194,52 @@ func getSampleName(token, sampleId string) string {
 	return (f["Response"].(map[string]interface{}))["Name"].(string)
 }
 
-func downloadProject(token, projectId string) {
+func downloadProject(token, projectId string, dryrun bool) {
 	fmt.Fprintf(os.Stderr, "Project: [%s] %s\n", projectId, getProjectName(token, projectId))
 
-	url := basespaceApiUrl + "projects/" + projectId + "/samples?access_token="
+	offset := 0
+	total := 0
 
-	resp, err := http.Get(url + token)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error downloading URL: %s\n\n", url)
-		os.Exit(1)
-	}
+	for total == 0 || offset < total {
+		url := fmt.Sprintf("%s/projects/%s/samples?Offset=%d&access_token=", basespaceApiUrl, projectId, offset)
 
-	defer resp.Body.Close()
-	body, err := ioutil.ReadAll(resp.Body)
+		resp, err := http.Get(url + token)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error downloading URL: %s\n\n", url)
+			os.Exit(1)
+		}
 
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error processing reading result: %s\n\n", string(body))
-		os.Exit(1)
-	}
+		defer resp.Body.Close()
+		body, err := ioutil.ReadAll(resp.Body)
 
-	var f map[string]interface{}
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error processing reading result: %s\n\n", string(body))
+			os.Exit(1)
+		}
 
-	if err = json.Unmarshal(body, &f); err != nil {
-		fmt.Fprintf(os.Stderr, "Error processing JSON: %s\n\n", string(body))
-		os.Exit(1)
-	}
+		var f map[string]interface{}
 
-	for k, v := range f {
-		if k == "Response" {
-			for k2, v2 := range v.(map[string]interface{}) {
-				if k2 == "Items" {
-					items := v2.([]interface{})
-					for i := range items {
-						v3 := items[i].(map[string]interface{})
-						sampleId := v3["Id"].(string)
-						sampleName := v3["Name"].(string)
-						downloadSample(token, sampleId, sampleName, "  ")
+		if err = json.Unmarshal(body, &f); err != nil {
+			fmt.Fprintf(os.Stderr, "Error processing JSON: %s\n\n", string(body))
+			os.Exit(1)
+		}
+
+		for k, v := range f {
+			if k == "Response" {
+				for k2, v2 := range v.(map[string]interface{}) {
+					if k2 == "Items" {
+						items := v2.([]interface{})
+						for i := range items {
+							v3 := items[i].(map[string]interface{})
+							sampleId := v3["Id"].(string)
+							sampleName := v3["Name"].(string)
+							downloadSample(token, sampleId, sampleName, "  ", dryrun)
+						}
 					}
 				}
+				total = int(v.(map[string]interface{})["TotalCount"].(float64))
+				displayed := int(v.(map[string]interface{})["DisplayedCount"].(float64))
+				offset += displayed
 			}
 		}
 	}
