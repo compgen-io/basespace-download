@@ -113,15 +113,20 @@ func downloadFile(token, fileId, filename string, fileSize int64, prefix string,
 		return
 	}
 
+	if _, err := os.Stat(filename); err == nil {
+		fmt.Fprintf(os.Stderr, "%s%s already exists!\n", prefix, filename)
+		return
+	}
+
+	out, err := os.Create(filename + ".tmp")
+	defer out.Close()
+
 	url := basespaceApiUrl + "/files/" + fileId + "/content?access_token="
 	resp, err := http.Get(url + token)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error downloading URL: %s\n\n", url)
 		os.Exit(1)
 	}
-
-	out, err := os.Create(filename)
-	defer out.Close()
 
 	defer resp.Body.Close()
 
@@ -142,8 +147,11 @@ func downloadFile(token, fileId, filename string, fileSize int64, prefix string,
 
 	n, err := io.Copy(out, progressR)
 	if err != nil {
+		os.Remove(filename + ".tmp")
 		log.Fatal(err, n)
 	}
+
+	os.Rename(filename+".tmp", filename)
 }
 
 func getProjectName(token, projectId string) string {
