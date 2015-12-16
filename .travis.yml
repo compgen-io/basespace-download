@@ -8,4 +8,4 @@ before_install:
   - go get github.com/tcnksm/ghr
 after_success:
   - gox -output "dist/{{.OS}}_{{.Arch}}_{{.Dir}}"
-  - ghr --username compgen-io --token $GITHUB_TOKEN --replace --prerelease --debug v0.1 dist/
+  - ghr --username compgen-io --token $GITHUB_TOKEN --replace --prerelease --debug v0.2 dist/
